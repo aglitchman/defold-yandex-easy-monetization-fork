@@ -1,5 +1,5 @@
 platform :ios, '13.0'
-pod 'YandexMobileAds', '7.12.0' # 7.12.1
+pod 'YandexMobileAds', '8.3.0'
 pod 'GoogleYandexMobileAdsAdapters'
 pod 'UnityAdsYandexMobileAdsAdapters'
 pod 'AppLovinYandexMobileAdsAdapters'

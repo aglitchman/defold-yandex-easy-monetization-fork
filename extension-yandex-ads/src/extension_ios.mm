@@ -32,13 +32,11 @@ namespace dmYandexAds {
 }
 
 @interface ExtensionInterface : NSObject <
-	YMAAdViewDelegate,
-	YMAInterstitialAdLoaderDelegate,
+	YMABannerAdViewDelegate,
 	YMAInterstitialAdDelegate,
-	YMARewardedAdLoaderDelegate,
 	YMARewardedAdDelegate
 >
-@property(strong) YMAAdView *adView;
+@property(strong) YMABannerAdView *adView;
 @property(strong) YMAInterstitialAd *interstitialAd;
 @property(strong) YMARewardedAd *rewardedAd;
 @property(strong) YMAInterstitialAdLoader *interstitialAdLoader;
@@ -64,11 +62,9 @@ namespace dmYandexAds {
 	self.interstitialAdLoader = nil;
 	self.rewardedAdLoader = nil;
 
-	[YMAMobileAds initializeSDKWithCompletionHandler: ^{
+	[YMAYandexAds initializeSDKWithCompletionHandler: ^{
 		self.interstitialAdLoader = [YMAInterstitialAdLoader new];
-		self.interstitialAdLoader.delegate = self;
 		self.rewardedAdLoader = [YMARewardedAdLoader new];
-		self.rewardedAdLoader.delegate = self;
 		SendSimpleMessage(MSG_ADS_INITED, EVENT_LOADED);
 	}];
 
@@ -76,11 +72,22 @@ namespace dmYandexAds {
 }
 
 -(void)enableLogging {
-	[YMAMobileAds enableLogging];
+	[YMAYandexAds enableLogging];
 }
 
 -(void)setUserConsent:(bool)consent {
-	[YMAMobileAds setUserConsent:(consent ? YES : NO)];
+	[YMAYandexAds setUserConsent:(consent ? YES : NO)];
+}
+
+// SDK 8: adUnitId is passed with every load via YMAAdRequest;
+// the only ObjC initializer is the full designated one.
+static YMAAdRequest *MakeAdRequest(const char *unitId) {
+	return [[YMAAdRequest alloc] initWithAdUnitID:@(unitId)
+	                                    targeting:nil
+	                                      adTheme:YMAAdThemeUnspecified
+	                                  biddingData:nil
+	                            headerBiddingData:nil
+	                                   parameters:nil];
 }
 
 /* #region Banner methods */
@@ -91,17 +98,17 @@ namespace dmYandexAds {
 		[self.adView removeFromSuperview];
 	}
 
-	YMABannerAdSize *adSize = [YMABannerAdSize inlineSizeWithWidth:320 maxHeight:50];
+	YMABannerAdSize *adSize = [YMABannerAdSize inlineWithWidth:320 maxHeight:50];
 	if (width > 0 && height > 0) {
-		adSize = [YMABannerAdSize inlineSizeWithWidth:width maxHeight:height];
+		adSize = [YMABannerAdSize inlineWithWidth:width maxHeight:height];
 	} else if (width > 0) {
-		adSize = [YMABannerAdSize stickySizeWithContainerWidth:width];
+		adSize = [YMABannerAdSize stickyWithContainerWidth:width];
 	}
-	self.adView = [[YMAAdView alloc] initWithAdUnitID:@(unitId) adSize:adSize];
+	self.adView = [[YMABannerAdView alloc] initWithAdSize:adSize];
 	self.adView.delegate = self;
 	self.adView.translatesAutoresizingMaskIntoConstraints = false;
 
-	[self.adView loadAd];
+	[self.adView loadAdWithRequest:MakeAdRequest(unitId)];
 }
 
 -(bool)isBannerLoaded {
@@ -140,8 +147,17 @@ namespace dmYandexAds {
 -(void)loadInterstitial:(const char *)unitId {
 	isInterstitialLoadedBool = false;
 	if (self.interstitialAdLoader != nil) {
-		YMAAdRequestConfiguration *configuration = [[YMAAdRequestConfiguration alloc] initWithAdUnitID:@(unitId)];
-        [self.interstitialAdLoader loadAdWithRequestConfiguration:configuration];
+		[self.interstitialAdLoader loadAdWith:MakeAdRequest(unitId)
+		                    completionHandler:^(YMAInterstitialAd * _Nullable ad, NSError * _Nullable error) {
+			if (ad != nil) {
+				self.interstitialAd = ad;
+				self.interstitialAd.delegate = self;
+				self->isInterstitialLoadedBool = true;
+				SendSimpleMessage(MSG_INTERSTITIAL, EVENT_LOADED);
+			} else {
+				SendSimpleMessage(MSG_INTERSTITIAL, EVENT_ERROR_LOAD);
+			}
+		}];
 	}
 }
 
@@ -162,8 +178,17 @@ namespace dmYandexAds {
 -(void)loadRewarded:(const char *)unitId {
 	isRewardedLoadedBool = false;
 	if (self.rewardedAdLoader != nil) {
-		YMAAdRequestConfiguration *configuration = [[YMAAdRequestConfiguration alloc] initWithAdUnitID:@(unitId)];
-		[self.rewardedAdLoader loadAdWithRequestConfiguration:configuration];
+		[self.rewardedAdLoader loadAdWith:MakeAdRequest(unitId)
+		                completionHandler:^(YMARewardedAd * _Nullable ad, NSError * _Nullable error) {
+			if (ad != nil) {
+				self.rewardedAd = ad;
+				self.rewardedAd.delegate = self;
+				self->isRewardedLoadedBool = true;
+				SendSimpleMessage(MSG_REWARDED, EVENT_LOADED);
+			} else {
+				SendSimpleMessage(MSG_REWARDED, EVENT_ERROR_LOAD);
+			}
+		}];
 	}
 }
 
@@ -179,58 +204,35 @@ namespace dmYandexAds {
 
 /* #endregion */
 
-/* #region YMAAdViewDelegate */
--(void)adViewDidLoad:(nonnull YMAAdView *)adView {
+/* #region YMABannerAdViewDelegate */
+-(void)bannerAdViewDidLoad:(nonnull YMABannerAdView *)bannerAdView {
 	isBannerLoadedBool = true;
 	SendSimpleMessage(MSG_BANNER, EVENT_LOADED);
 }
 
--(void)adViewDidFailLoading:(nonnull YMAAdView *)adView error:(nonnull NSError *)error {
+-(void)bannerAdViewDidFailLoading:(nonnull YMABannerAdView *)bannerAdView error:(nonnull NSError *)error {
 	SendSimpleMessage(MSG_BANNER, EVENT_ERROR_LOAD);
 }
 
--(void)adViewDidClick:(nonnull YMAAdView *)adView {
+-(void)bannerAdViewDidClick:(nonnull YMABannerAdView *)bannerAdView {
 	SendSimpleMessage(MSG_BANNER, EVENT_CLICKED);
 }
 
-/*-(void)adViewWillLeaveApplication:(nonnull YMAAdView *)adView {
-	dmLogInfo("Ad will leave appliaction.");
-}
-
--(void)adView:(nonnull YMAAdView *)adView willPresentScreen:(nullable UIViewController *)viewController {
-	dmLogInfo("Ad will present screen.");
-}
-
--(void)adView:(nonnull YMAAdView *)adView didDismissScreen:(nullable UIViewController *)viewController {
-	dmLogInfo("Ad did dismiss screen.");
-}*/
-
--(void)adView:(nonnull YMAAdView *)adView didTrackImpressionWithData:(nullable id<YMAImpressionData>)impressionData {
+-(void)bannerAdView:(nonnull YMABannerAdView *)bannerAdView didTrackImpressionWithData:(nullable id<YMAImpressionData>)impressionData {
 	SendImpressionMessage(MSG_BANNER, impressionData.rawData.UTF8String);
 }
-/* #endregion */
-
-/* #region YMAInterstitialAdLoaderDelegate */
-
--(void)interstitialAdLoader:(nonnull YMAInterstitialAdLoader *)adLoader
-didLoad:(nonnull YMAInterstitialAd *)interstitialAd {
-	isInterstitialLoadedBool = true;
-	self.interstitialAd = interstitialAd;
-	self.interstitialAd.delegate = self;
-	SendSimpleMessage(MSG_INTERSTITIAL, EVENT_LOADED);
-}
-
--(void)interstitialAdLoader:(nonnull YMAInterstitialAdLoader *)adLoader
-didFailToLoadWithError:(nonnull YMAAdRequestError *)error {
-	SendSimpleMessage(MSG_INTERSTITIAL, EVENT_ERROR_LOAD);
-}
-
 /* #endregion */
 
 /* #region YMAInterstitialAdDelegate */
 
 -(void)interstitialAdDidShow:(YMAInterstitialAd *)interstitialAd {
 	SendSimpleMessage(MSG_INTERSTITIAL, EVENT_SHOWN);
+}
+
+-(void)interstitialAd:(YMAInterstitialAd *)interstitialAd didFailToShowWithError:(NSError *)error {
+	isInterstitialLoadedBool = false;
+	self.interstitialAd = nil;
+	SendSimpleMessage(MSG_INTERSTITIAL, EVENT_DISMISSED);
 }
 
 -(void)interstitialAdDidDismiss:(YMAInterstitialAd *)interstitialAd {
@@ -250,23 +252,6 @@ didTrackImpressionWithData:(nullable id<YMAImpressionData>)impressionData {
 
 /* #endregion */
 
-/* #region YMARewardedAdLoaderDelegate */
-
--(void)rewardedAdLoader:(YMARewardedAdLoader *)adLoader
-didLoad:(YMARewardedAd *)rewardedAd {
-	isRewardedLoadedBool = true;
-	self.rewardedAd = rewardedAd;
-	self.rewardedAd.delegate = self;
-	SendSimpleMessage(MSG_REWARDED, EVENT_LOADED);
-}
-
--(void)rewardedAdLoader:(YMARewardedAdLoader *)adLoader
-didFailToLoadWithError:(YMAAdRequestError *)error {
-	SendSimpleMessage(MSG_REWARDED, EVENT_ERROR_LOAD);
-}
-
-/* #endregion */
-
 /* #region YMARewardedAdDelegate */
 
 -(void)rewardedAd:(YMARewardedAd *)rewardedAd didReward:(id<YMAReward>)reward {
@@ -275,6 +260,12 @@ didFailToLoadWithError:(YMAAdRequestError *)error {
 
 -(void)rewardedAdDidShow:(YMARewardedAd *)rewardedAd {
 	SendSimpleMessage(MSG_REWARDED, EVENT_SHOWN);
+}
+
+-(void)rewardedAd:(YMARewardedAd *)rewardedAd didFailToShowWithError:(NSError *)error {
+	isRewardedLoadedBool = false;
+	self.rewardedAd = nil;
+	SendSimpleMessage(MSG_REWARDED, EVENT_DISMISSED);
 }
 
 -(void)rewardedAdDidDismiss:(YMARewardedAd *)rewardedAd {

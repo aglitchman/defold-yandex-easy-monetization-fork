@@ -20,10 +20,9 @@ import com.yandex.mobile.ads.banner.BannerAdSize;
 import com.yandex.mobile.ads.banner.BannerAdView;
 import com.yandex.mobile.ads.common.AdError;
 import com.yandex.mobile.ads.common.AdRequest;
-import com.yandex.mobile.ads.common.AdRequestConfiguration;
 import com.yandex.mobile.ads.common.AdRequestError;
 import com.yandex.mobile.ads.common.ImpressionData;
-import com.yandex.mobile.ads.common.MobileAds;
+import com.yandex.mobile.ads.common.YandexAds;
 
 import com.yandex.mobile.ads.interstitial.InterstitialAd;
 import com.yandex.mobile.ads.interstitial.InterstitialAdEventListener;
@@ -74,7 +73,7 @@ public class ExtensionYandexAds {
     }
 
     public void initialize() {
-        activity.runOnUiThread(() -> MobileAds.initialize(activity, () -> {
+        activity.runOnUiThread(() -> YandexAds.initialize(activity, () -> {
             Log.d(TAG, "onInitializationCompleted");
             initInterstitial();
             initRewarded();
@@ -86,22 +85,23 @@ public class ExtensionYandexAds {
     // нужно делать перед инициализацией Yandex Mobile Ads SDK
     public void setUserConsent(boolean enable_rdp) {
         Log.d(TAG, "setUserConsent:"+enable_rdp);
-        MobileAds.setUserConsent(enable_rdp);
+        YandexAds.setUserConsent(enable_rdp);
     }
 
       public void enableLogging() {
         Log.d(TAG, "enableLogging");
-        MobileAds.enableLogging(true);
+        YandexAds.enableLogging(true);
     }
 
     // ------------------------------------------------------------------------------------------
     private InterstitialAdLoader mInterstitialAdLoader;
+    private InterstitialAdLoadListener mInterstitialAdLoadListener;
     private InterstitialAdEventListener mInterstitialAdEventListener;
     private InterstitialAd mInterstitialAd;
 
     private void initInterstitial(){
         mInterstitialAdLoader = new InterstitialAdLoader(activity);
-        mInterstitialAdLoader.setAdLoadListener(new InterstitialAdLoadListener() {
+        mInterstitialAdLoadListener = new InterstitialAdLoadListener() {
             @Override
             public void onAdLoaded(@NonNull InterstitialAd interstitialAd) {
                 Log.d(TAG, "interstitial:onAdLoaded");
@@ -114,7 +114,7 @@ public class ExtensionYandexAds {
                 Log.e(TAG, "interstitial:onAdFailedToLoad" + adRequestError);
                 sendSimpleMessage(MSG_INTERSTITIAL, EVENT_ERROR_LOAD, "error", adRequestError.toString());
             }
-        });
+        };
 
         mInterstitialAdEventListener = new InterstitialAdEventListener() {
             @Override
@@ -156,7 +156,7 @@ public class ExtensionYandexAds {
             Log.d(TAG, "loadInterstitial: "+unitId);
             if (mInterstitialAdLoader != null) {
                 destroyInterstitial();
-                mInterstitialAdLoader.loadAd(new AdRequestConfiguration.Builder(unitId).build());
+                mInterstitialAdLoader.loadAd(new AdRequest.Builder(unitId).build(), mInterstitialAdLoadListener);
             }
         });
     }
@@ -187,12 +187,13 @@ public class ExtensionYandexAds {
 
     // ------------------------------------------------------------------------------------------
     private RewardedAdLoader mRewardedAdLoader;
+    private RewardedAdLoadListener mRewardedAdLoadListener;
     private  RewardedAdEventListener mRewardedAdEventListener;
     private RewardedAd mRewardedAd;
 
     private void initRewarded(){
         mRewardedAdLoader = new RewardedAdLoader(activity);
-        mRewardedAdLoader.setAdLoadListener(new RewardedAdLoadListener() {
+        mRewardedAdLoadListener = new RewardedAdLoadListener() {
             @Override
             public void onAdLoaded(@NonNull RewardedAd rewardedAd) {
                 Log.d(TAG, "rewarded:onAdLoaded");
@@ -205,7 +206,7 @@ public class ExtensionYandexAds {
                 Log.e(TAG, "rewarded:onAdFailedToLoad" + adRequestError);
                 sendSimpleMessage(MSG_REWARDED, EVENT_ERROR_LOAD, "error", adRequestError.toString());
             }
-        });
+        };
 
         mRewardedAdEventListener = new RewardedAdEventListener() {
             @Override
@@ -253,7 +254,7 @@ public class ExtensionYandexAds {
             Log.d(TAG, "loadRewarded: "+unitId);
             if (mRewardedAdLoader != null) {
                 destroyRewardedAd();
-                mRewardedAdLoader.loadAd(new AdRequestConfiguration.Builder(unitId).build());
+                mRewardedAdLoader.loadAd(new AdRequest.Builder(unitId).build(), mRewardedAdLoadListener);
             }
         });
     }
@@ -316,12 +317,6 @@ public class ExtensionYandexAds {
                 if (impressionData != null)
                     sendSimpleMessage(MSG_BANNER, EVENT_IMPRESSION, "data", impressionData.getRawData());
             }
-
-            @Override
-            public void onLeftApplication() {}
-
-            @Override
-            public void onReturnedToApplication() {}
         };
     }
 
@@ -332,18 +327,17 @@ public class ExtensionYandexAds {
                 _destroyBanner();
 
             final BannerAdView view = new BannerAdView(activity);
-            view.setAdUnitId(unitId);
-            BannerAdSize adSize = BannerAdSize.inlineSize(activity, 320, 50);
-            if (width > 0 && height > 0) 
-                adSize = BannerAdSize.inlineSize(activity, width, height);
+            BannerAdSize adSize = BannerAdSize.inline(activity, 320, 50);
+            if (width > 0 && height > 0)
+                adSize = BannerAdSize.inline(activity, width, height);
             else if (width > 0)
-                adSize = BannerAdSize.stickySize(activity, width);
+                adSize = BannerAdSize.sticky(activity, width);
             view.setAdSize(adSize);
             view.setVisibility(View.INVISIBLE);
             mBannerAdView = view;
             createLayout();
 
-            AdRequest adRequest = new AdRequest.Builder().build();
+            AdRequest adRequest = new AdRequest.Builder(unitId).build();
             view.setBannerAdEventListener(mBannerAdEventListener);
             // Загрузка объявления.
             view.loadAd(adRequest);
