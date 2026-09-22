@@ -1,3 +1,5 @@
+> Personal fork for our own company projects. Not intended for an upstream pull request.
+
 # Yandex Mobile Ads SDK for Defold
 _“This plugin is not endorsed or sponsored by Yandex LLC. This is an independent, unofficial plugin. “_
 
@@ -10,12 +12,36 @@ Defold [native extension](https://www.defold.com/manuals/extensions/) which prov
 You can use the Yandex Mobile Ads SDK for Defold extension in your own project by adding this project as a [Defold library dependency](http://www.defold.com/manuals/libraries/).
 Open your game.project file and in the dependencies field under project add:
 
->https://github.com/osov/defold-yandex-easy-monetization/archive/main.zip
-or point to the ZIP file of a [specific release](https://github.com/osov/defold-yandex-easy-monetization/releases).
+>https://github.com/aglitchman/defold-yandex-easy-monetization-fork/archive/refs/heads/main.zip
+For reproducible dependencies, use an archive URL for a specific commit of this fork.
 
 Please, read [Android API docs](https://yandex.ru/support2/mobile-ads/en/dev/android/quick-start) and [iOS API docs](https://yandex.ru/support2/mobile-ads/en/dev/ios/quick-start)
 
 This repository also acts as a sample app. See `main/main.gui_script`.
+
+## Fork changes (Android)
+
+Android uses Yandex Mobile Ads **8.4.0** with Unity Ads, LevelPlay, Mintegral, Bigo, Vungle and myTarget mediation. Google and AppLovin adapters are excluded. Set `[android] minimum_sdk_version` to **23** or higher; the resolved advertising support libraries require it. iOS keeps the upstream implementation and SDK configuration; the Android privacy additions below are not exposed on iOS.
+
+Automatic Android SDK initialization is disabled. Before `initialize()`, call `apply_privacy(json_payload)` and check its boolean result. Until privacy is applied successfully, Android initialization and ad loading/showing remain blocked. The existing `set_user_consent()` API does not replace this step.
+
+`json_payload` contains:
+
+- `cmp.gdpr_applies` and `cmp.us_regulation_applies`: known booleans from CMP status.
+- `consent.storage.IABTCF_TCString`: a nonempty TC string when GDPR applies. The SDKs read real TCF/Additional Consent preferences written by CMP; the payload is not a replacement for that storage.
+- `consent.us_privacy.known` and `consent.us_privacy.opt_out`: decoded applicable US choices when US regulations apply. Unknown choices fail rather than granting consent.
+
+The data shape matches [InMobi CMP for Defold](https://github.com/indiesoftby/defold-inmobi-cmp). After its native flow reports ready, pass `json.encode({ cmp = status.cmp, consent = inmobi_cmp.get_consent() })`. Flow completion alone is not a universal consent grant. Configure the actual vendors and applicable regulations in CMP.
+
+On a privacy change, call `reset_ads(generation)` with a new integer generation before requesting fresh ads. It revokes the applied state, clears cached ads and replaces loaders. Apply the new choices before loading again. Android callback messages include `generation`; ignore messages whose generation differs from your current one. Callbacks from obsolete loaders cannot refill the ad cache.
+
+For the Android demo, add the InMobi dependency below and configure `[inmobi_cmp] p_code` and a matching registered `[android] package` at build time:
+
+```text
+https://github.com/indiesoftby/defold-inmobi-cmp/archive/refs/heads/main.zip
+```
+
+The demo's Init button attaches CMP and waits for its flow before initializing ads. Without configured CMP it logs setup instructions and does not load ads. On Android the consent button reopens the applicable CMP form instead of granting blanket consent. Applications where both GDPR and US settings apply should expose both form methods. The extension itself does not require a particular CMP implementation.
 
 # Lua API
 
@@ -23,6 +49,8 @@ This repository also acts as a sample app. See `main/main.gui_script`.
 
 	yandexads.set_callback(listener) -- listener: function
 	yandexads.initialize()
+	yandexads.apply_privacy(json_payload) -- Android only; returns boolean
+	yandexads.reset_ads(generation) -- Android only; generation: integer
 	yandexads.enable_logging()
 	yandexads.set_user_consent(consent) -- consent: boolean
 
@@ -70,8 +98,8 @@ This repository also acts as a sample app. See `main/main.gui_script`.
 # How to use ?
 
 1. Set an event handling callback
-2. Run initialization
-3. Load desired ad format
+2. On Android, wait for CMP and successfully apply its current privacy signals as described above.
+3. Run initialization, then load the desired ad format after the initialization callback.
 ```lua
 local function listener(self, message_id, message)
 	if message_id == yandexads.MSG_ADS_INITED then
@@ -149,3 +177,9 @@ local function listener(self, message_id, message)
 	end
 end
 ```
+
+## Build and checks
+
+Run `python tools/build.py android --variant debug` or `--variant release`. Each run resolves the current stable Defold release from `https://d.defold.com/stable/info.json`. Optional local settings can be passed with `--settings local.project`. Build logs and resolved engine details are saved in `.cache/`; bundles are saved in `bundles/`.
+
+Run `luajit tests/demo_privacy.lua` to check the demo consent flow and retained iOS initialization, and `python tools/test_privacy.py` for host-JVM privacy signal tests. They use Android/advertising API stand-ins and do not establish live mediation delivery. iOS sources are preserved, but these Android changes have not been validated with an iOS build or device run.

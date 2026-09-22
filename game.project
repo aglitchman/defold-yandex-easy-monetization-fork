@@ -20,10 +20,10 @@ infoplist = /Info.plist
 bundle_identifier = sbGames.test
 
 [android]
-package = com.yandex.ads
+package = com.indiesoftby.yandexadsdemo
 immersive_mode = 1
 display_cutout = 0
-minimum_sdk_version = 21
+minimum_sdk_version = 23
 
 [library]
 include_dirs = extension-yandex-ads

@@ -67,19 +67,50 @@ public class ExtensionYandexAds {
     private static final int BANNER_320_50 = 0;
 
     private final Activity activity;
+    private volatile boolean privacyApplied;
+    private boolean sdkInitialized;
+    private int generation;
+
+    public boolean applyPrivacy(String payload) {
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        privacyApplied = false;
+        activity.runOnUiThread(() -> {
+            try { PrivacySignals.apply(activity, new JSONObject(payload)); privacyApplied = true; }
+            catch (Exception | LinkageError error) { Log.e(TAG, "Privacy configuration failed", error); }
+            finally { done.countDown(); }
+        });
+        try { return done.await(5, java.util.concurrent.TimeUnit.SECONDS) && privacyApplied; }
+        catch (InterruptedException error) { Thread.currentThread().interrupt(); return false; }
+    }
+
+    public void resetAds(int nextGeneration) {
+        privacyApplied = false;
+        activity.runOnUiThread(() -> {
+            generation = nextGeneration;
+            destroyInterstitial();
+            destroyRewardedAd();
+            destroyBanner();
+            // Old loader callbacks capture the old generation and cannot repopulate cache.
+            if (sdkInitialized) { initInterstitial(); initRewarded(); initBanner(); }
+        });
+    }
 
     public ExtensionYandexAds(Activity mainActivity) {
         activity = mainActivity;
     }
 
     public void initialize() {
-        activity.runOnUiThread(() -> YandexAds.initialize(activity, () -> {
+        activity.runOnUiThread(() -> {
+            if (!privacyApplied) return;
+            YandexAds.initialize(activity, () -> {
+            sdkInitialized = true;
             Log.d(TAG, "onInitializationCompleted");
             initInterstitial();
             initRewarded();
             initBanner();
             sendSimpleMessage(MSG_ADS_INITED, EVENT_LOADED);
-        }));
+        });
+        });
     }
 
     // нужно делать перед инициализацией Yandex Mobile Ads SDK
@@ -100,10 +131,12 @@ public class ExtensionYandexAds {
     private InterstitialAd mInterstitialAd;
 
     private void initInterstitial(){
+        final int requestGeneration = generation;
         mInterstitialAdLoader = new InterstitialAdLoader(activity);
         mInterstitialAdLoadListener = new InterstitialAdLoadListener() {
             @Override
             public void onAdLoaded(@NonNull InterstitialAd interstitialAd) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.d(TAG, "interstitial:onAdLoaded");
                 mInterstitialAd = interstitialAd;
                 sendSimpleMessage(MSG_INTERSTITIAL, EVENT_LOADED);
@@ -111,6 +144,7 @@ public class ExtensionYandexAds {
 
             @Override
             public void onAdFailedToLoad(@NonNull AdRequestError adRequestError) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.e(TAG, "interstitial:onAdFailedToLoad" + adRequestError);
                 sendSimpleMessage(MSG_INTERSTITIAL, EVENT_ERROR_LOAD, "error", adRequestError.toString());
             }
@@ -153,6 +187,7 @@ public class ExtensionYandexAds {
 
     public void loadInterstitial(final String unitId) {
         activity.runOnUiThread(() -> {
+            if (!privacyApplied) return;
             Log.d(TAG, "loadInterstitial: "+unitId);
             if (mInterstitialAdLoader != null) {
                 destroyInterstitial();
@@ -167,7 +202,7 @@ public class ExtensionYandexAds {
 
     public void showInterstitial() {
         activity.runOnUiThread(() -> {
-            if (isInterstitialLoaded()) {
+            if (privacyApplied && isInterstitialLoaded()) {
                 Log.d(TAG, "showInterstitial");
                 mInterstitialAd.setAdEventListener(mInterstitialAdEventListener);
                 mInterstitialAd.show(activity);
@@ -192,10 +227,12 @@ public class ExtensionYandexAds {
     private RewardedAd mRewardedAd;
 
     private void initRewarded(){
+        final int requestGeneration = generation;
         mRewardedAdLoader = new RewardedAdLoader(activity);
         mRewardedAdLoadListener = new RewardedAdLoadListener() {
             @Override
             public void onAdLoaded(@NonNull RewardedAd rewardedAd) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.d(TAG, "rewarded:onAdLoaded");
                 mRewardedAd = rewardedAd;
                 sendSimpleMessage(MSG_REWARDED, EVENT_LOADED);
@@ -203,6 +240,7 @@ public class ExtensionYandexAds {
 
             @Override
             public void onAdFailedToLoad(@NonNull AdRequestError adRequestError) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.e(TAG, "rewarded:onAdFailedToLoad" + adRequestError);
                 sendSimpleMessage(MSG_REWARDED, EVENT_ERROR_LOAD, "error", adRequestError.toString());
             }
@@ -251,6 +289,7 @@ public class ExtensionYandexAds {
 
     public void loadRewarded(final String unitId) {
         activity.runOnUiThread(() -> {
+            if (!privacyApplied) return;
             Log.d(TAG, "loadRewarded: "+unitId);
             if (mRewardedAdLoader != null) {
                 destroyRewardedAd();
@@ -265,7 +304,7 @@ public class ExtensionYandexAds {
 
     public void showRewarded() {
         activity.runOnUiThread(() -> {
-            if (isRewardedLoaded()) {
+            if (privacyApplied && isRewardedLoaded()) {
                 Log.d(TAG, "showRewarded");
                 mRewardedAd.setAdEventListener(mRewardedAdEventListener);
                 mRewardedAd.show(activity);
@@ -292,27 +331,32 @@ public class ExtensionYandexAds {
     private int m_bannerPosition = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
 
     private void initBanner(){
+       final int requestGeneration = generation;
        mBannerAdEventListener = new BannerAdEventListener() {
             @Override
             public void onAdLoaded() {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.d(TAG, "banner:onAdLoaded");
                 sendSimpleMessage(MSG_BANNER, EVENT_LOADED);
             }
 
             @Override
             public void onAdFailedToLoad(AdRequestError adRequestError) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.e(TAG, "banner:onAdFailedToLoad" + adRequestError.toString());
                 sendSimpleMessage(MSG_BANNER, EVENT_ERROR_LOAD, "error", adRequestError.toString());
             }
 
             @Override
             public void onAdClicked() {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.d(TAG, "banner:onAdClicked");
                 sendSimpleMessage(MSG_BANNER, EVENT_CLICKED);
             }
 
             @Override
             public void onImpression(@Nullable ImpressionData impressionData) {
+                if (!privacyApplied || requestGeneration != generation) return;
                 Log.d(TAG, "banner:onImpression");
                 if (impressionData != null)
                     sendSimpleMessage(MSG_BANNER, EVENT_IMPRESSION, "data", impressionData.getRawData());
@@ -322,6 +366,7 @@ public class ExtensionYandexAds {
 
     public void loadBanner(final String unitId, int width, int height) {
         activity.runOnUiThread(() -> {
+            if (!privacyApplied || !sdkInitialized) return;
             Log.d(TAG, "loadBanner: "+unitId+' '+width+'/'+height);
             if (isBannerLoaded())
                 _destroyBanner();
@@ -403,6 +448,7 @@ public class ExtensionYandexAds {
 
     public void showBanner(final int pos) {
         activity.runOnUiThread(() -> {
+            if (!privacyApplied) return;
             Log.d(TAG, "showBanner: "+pos);
             if (!isBannerLoaded()) {
                 return;
@@ -528,6 +574,7 @@ public class ExtensionYandexAds {
         try {
             JSONObject obj = new JSONObject();
             obj.put("event", eventId);
+            obj.put("generation", generation);
             message = obj.toString();
         } catch (JSONException e) {
             message = getJsonConversionErrorMessage(e.getLocalizedMessage());
@@ -540,6 +587,7 @@ public class ExtensionYandexAds {
         try {
             JSONObject obj = new JSONObject();
             obj.put("event", eventId);
+            obj.put("generation", generation);
             obj.put(key_2, value_2);
             message = obj.toString();
         } catch (JSONException e) {

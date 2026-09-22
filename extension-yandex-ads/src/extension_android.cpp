@@ -20,6 +20,8 @@ namespace dmYandexAds
         jobject m_AppJNI;
 
         jmethodID m_Initialize;
+        jmethodID m_ApplyPrivacy;
+        jmethodID m_ResetAds;
 
         jmethodID m_LoadInterstitial;
         jmethodID m_IsInterstitialLoaded;
@@ -107,6 +109,8 @@ namespace dmYandexAds
     static void InitJNIMethods(JNIEnv *env, jclass cls)
     {
         g_app.m_Initialize = env->GetMethodID(cls, "initialize", "()V");
+        g_app.m_ApplyPrivacy = env->GetMethodID(cls, "applyPrivacy", "(Ljava/lang/String;)Z");
+        g_app.m_ResetAds = env->GetMethodID(cls, "resetAds", "(I)V");
 
         g_app.m_LoadInterstitial = env->GetMethodID(cls, "loadInterstitial", "(Ljava/lang/String;)V");
         g_app.m_IsInterstitialLoaded = env->GetMethodID(cls, "isInterstitialLoaded", "()Z");
@@ -145,6 +149,17 @@ namespace dmYandexAds
     {
         CallVoidMethod(g_app.m_AppJNI, g_app.m_UpdateBannerLayout);
     }
+
+    bool ApplyPrivacy(const char* payload) {
+        dmAndroid::ThreadAttacher thread;
+        JNIEnv* env = thread.GetEnv();
+        jstring value = env->NewStringUTF(payload);
+        bool result = env->CallBooleanMethod(g_app.m_AppJNI, g_app.m_ApplyPrivacy, value);
+        env->DeleteLocalRef(value);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); return false; }
+        return result;
+    }
+    void ResetAds(int generation) { CallVoidMethodInt(g_app.m_AppJNI, g_app.m_ResetAds, generation); }
 
     void Initialize()
     {

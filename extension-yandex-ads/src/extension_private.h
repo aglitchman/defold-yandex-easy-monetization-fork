@@ -18,6 +18,10 @@ namespace dmYandexAds {
 	void ActivateApp();
 
 	void Initialize();
+#if defined(DM_PLATFORM_ANDROID)
+    bool ApplyPrivacy(const char* payload);
+    void ResetAds(int generation);
+#endif
 	void EnableLogging();
 
 	void LoadInterstitial(const char *unitId);

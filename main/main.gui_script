@@ -43,22 +43,94 @@ yandexads_ids = yandexads_ids[system_name] or {}
 
 -- YandexAds event handler.
 local function yandexads_listener(self, message_id, message)
+    if system_name == 'Android' and message.generation ~= self.ad_generation then
+        return
+    end
 	log('yandexads_listener')
 	plog({message_id = message_id, message = message})
 end
 
 -- Button handlers
 
-local function init_pressed(self)
-	log('init_pressed')
-	-- Init YandexAds
-	yandexads.set_callback(yandexads_listener)
-	yandexads.initialize()
+--- Apply current CMP choices before allowing Android advertising.
+-- @param self demo state
+local function update_android_privacy(self)
+    if not self.cmp_attached then return end
+    local state = inmobi_cmp.get_status()
+    if not state then return end
+    local changed = self.cmp_revision ~= state.revision
+    if changed or (not state.flow_ready and self.privacy_applied) then
+        self.ad_generation = self.ad_generation + 1
+        yandexads.reset_ads(self.ad_generation)
+        self.privacy_applied = false
+        self.cmp_revision = state.revision
+    end
+    if not state.flow_ready or self.privacy_applied then return end
+    local consent = inmobi_cmp.get_consent()
+    if not consent then return end
+    self.privacy_applied = yandexads.apply_privacy(json.encode({
+        cmp = state.cmp,
+        consent = consent,
+    }))
+    if self.privacy_applied and not self.ads_initialized then
+        self.ads_initialized = true
+        yandexads.initialize()
+    end
 end
 
+--- Attach CMP on Android, or initialize the existing iOS advertising API.
+-- @param self demo state
+local function init_pressed(self)
+    yandexads.set_callback(yandexads_listener)
+    if system_name ~= 'Android' then
+        yandexads.initialize()
+        return
+    end
+    if not inmobi_cmp or not inmobi_cmp.is_supported() then
+        log('Add the InMobi CMP dependency and configure its p_code; see README.\n')
+        return
+    end
+    if not self.cmp_attached then
+        local ok, err = inmobi_cmp.initialize({
+            p_code = sys.get_config_string('inmobi_cmp.p_code', ''),
+        }, function(_, event, data)
+            log(event .. ': ' .. json.encode(data) .. '\n')
+        end)
+        if not ok then
+            log('CMP: ' .. tostring(err) .. '\n')
+            return
+        end
+        self.cmp_attached = true
+    end
+    update_android_privacy(self)
+end
+
+--- Reopen Android privacy settings; preserve the upstream iOS demo control.
+-- @param self demo state
 local function set_user_consent_pressed(self)
-	log('set_user_consent_pressed')
-	yandexads.set_user_consent(true)
+    if system_name ~= 'Android' then
+        yandexads.set_user_consent(true)
+        return
+    end
+    if not self.cmp_attached then
+        log('Initialize CMP first.\n')
+        return
+    end
+    local state = inmobi_cmp.get_status()
+    if not state or not state.loaded or not state.cmp then return end
+    self.ad_generation = self.ad_generation + 1
+    yandexads.reset_ads(self.ad_generation)
+    self.privacy_applied = false
+    local ok, err
+    if state.cmp.gdpr_applies == true then
+        ok, err = inmobi_cmp.show_gdpr()
+    elseif state.cmp.us_regulation_applies == true then
+        ok, err = inmobi_cmp.show_us_regulations()
+    else
+        log('No applicable consent form.\n')
+        return
+    end
+    if not ok then log('CMP: ' .. tostring(err) .. '\n') end
 end
 
 -- Banner
@@ -141,6 +213,7 @@ end
 
 -- GUI init
 function init(self)
+    self.ad_generation = 0
 	msg.post('.', 'acquire_input_focus')    
 	msg.post('@render:', 'clear_color', {color = vmath.vector4(1.0, 1.0, 1.0, 1.0)})
 	gui.set_enabled(gui.get_node('logs'), false)
@@ -149,6 +222,7 @@ end
 -- Update logs view
 local frame = 0
 function update(self, dt)
+    if system_name == 'Android' then update_android_privacy(self) end
 	frame = frame + 1
 	if frame == 30 then
 		log_flush()
@@ -198,4 +272,10 @@ function on_input(self, action_id, action)
 			button_click(self, action, button, callback)
 		end
 	end
+end
+
+--- Detach the CMP listener when the demo closes.
+-- @param self demo state
+function final(self)
+    if self.cmp_attached then inmobi_cmp.set_listener(nil) end
 end

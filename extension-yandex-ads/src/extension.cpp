@@ -12,6 +12,18 @@
 #include "utils/LuaUtils.h"
 
 namespace dmYandexAds {
+#if defined(DM_PLATFORM_ANDROID)
+    static int Lua_ApplyPrivacy(lua_State* L) {
+        lua_pushboolean(L, ApplyPrivacy(luaL_checkstring(L, 1)));
+        return 1;
+    }
+
+    static int Lua_ResetAds(lua_State* L) {
+        ResetAds(luaL_checkinteger(L, 1));
+        return 0;
+    }
+#endif
+
 	static int Lua_SetCallback(lua_State *L) {
 		DM_LUA_STACK_CHECK(L, 0);
 		SetLuaCallback(L, 1);
@@ -144,6 +156,10 @@ namespace dmYandexAds {
 	static const luaL_reg Module_methods[] = {
 		{"set_callback", Lua_SetCallback},
 		{"initialize", Lua_Initialize},
+#if defined(DM_PLATFORM_ANDROID)
+        {"apply_privacy", Lua_ApplyPrivacy},
+        {"reset_ads", Lua_ResetAds},
+#endif
 		{"enable_logging", Lua_EnableLogging},
 		{"set_user_consent", Lua_SetUserConsent},
 
